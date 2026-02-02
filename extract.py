@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys, os, zlib
 from struct import unpack
 
@@ -14,7 +15,7 @@ if len(sys.argv) > 2:
 else:
 	target = '.'
 
-if magic != 'JPA':
+if magic != b'JPA':
 	raise Exception('This does not seem to be an Akeeba Backup archive')
 
 header_size, = unpack('<H', archive.read(2))
@@ -28,7 +29,7 @@ usize, csize = unpack('<LL', archive.read(8))
 print('Uncompressed size: %d bytes, compressed: %d bytes' % (usize, csize))
 
 span_or_file = archive.read(3)
-if span_or_file == 'JP\1':
+if span_or_file == b'JP\x01':
 	archive.read(1 + 2) # Consume 4th magic and fixed header size
 	spans, = unpack('<H', archive.read(2))
 	print('Spans: %d' % spans)
@@ -36,15 +37,15 @@ if span_or_file == 'JP\1':
 		raise NotImplementedError('Span support is absent')
 	span_or_file = archive.read(3)
 
-print
+print()
 
-while span_or_file != '': # EOF
-	if span_or_file != 'JPF':
+while span_or_file != b'': # EOF
+	if span_or_file != b'JPF':
 		raise Exception('Invalid file header magic')
 
 	header_size, = unpack('<H', archive.read(2))
 	path_len, = unpack('<H', archive.read(2))
-	path = archive.read(path_len)
+	path = archive.read(path_len).decode('utf-8')
 	_type = ['dir', 'file', 'link'][unpack('<B', archive.read(1))[0]]
 	compression = ['none', 'gzip', 'bzip2'][unpack('<B', archive.read(1))[0]]
 
@@ -55,8 +56,8 @@ while span_or_file != '': # EOF
 	if header_size > (3 + 2 + 2 + path_len + 1 + 1 + 12):
 		extra, elen = unpack('<HH', archive.read(4))
 		if extra != 256:
-			print extra
-			raise Exception('Unkown extra field')
+			print(extra)
+			raise Exception('Unknown extra field')
 		archive.read(4) # Timestamp
 
 	if _type == 'file':
@@ -64,17 +65,22 @@ while span_or_file != '': # EOF
 		if not os.path.exists(os.path.dirname(to)):
 			os.makedirs(os.path.dirname(to))
 		data = archive.read(csize) # todo: memory
+		f = open(to, 'wb')
 		if compression == 'gzip':
-			open(to, 'wb').write(zlib.decompress(data, -15))
+			f.write(zlib.decompress(data, -15))
 		elif compression == 'none':
-			open(to, 'wb').write(data)
+			f.write(data)
 		else:
-			raise NotImplementedError('Unkown compression')
+			f.close()
+			raise NotImplementedError('Unknown compression')
+		f.close()
 	elif _type == 'dir':
 		to = os.path.join(target, path)
 		if not os.path.exists(to):
 			os.makedirs(to)
 	else:
-		raise NotImplementedError('Unkown entity type')
+		raise NotImplementedError('Unknown entity type')
 
 	span_or_file = archive.read(3)
+
+archive.close()
